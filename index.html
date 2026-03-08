@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LivePing — Custom Notification Broadcaster</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #080b10;
+      --surface: #0e1420;
+      --surface-2: #141b28;
+      --border: rgba(255,255,255,0.06);
+      --border-hover: rgba(255,255,255,0.12);
+      --accent: #00e5ff;
+      --accent-dim: rgba(0, 229, 255, 0.12);
+      --accent-glow: rgba(0, 229, 255, 0.25);
+      --green: #00ff88;
+      --green-dim: rgba(0, 255, 136, 0.12);
+      --red: #ff4466;
+      --red-dim: rgba(255, 68, 102, 0.12);
+      --purple: #bf6fff;
+      --purple-dim: rgba(191, 111, 255, 0.12);
+      --text: #e8edf5;
+      --text-muted: #5a6680;
+      --text-subtle: #8b98b8;
+    }
+
+    html { font-size: 16px; }
+
+    body {
+      font-family: 'Syne', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+      overflow-x: hidden;
+    }
+
+    /* Atmospheric background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 40% at 20% 10%, rgba(0,229,255,0.04) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 50% at 80% 90%, rgba(191,111,255,0.05) 0%, transparent 60%),
+        radial-gradient(ellipse 40% 60% at 50% 50%, rgba(0,255,136,0.02) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Grid overlay */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .wrapper {
+      width: 100%;
+      max-width: 520px;
+      position: relative;
+      z-index: 1;
+      animation: fadeUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--accent-dim);
+      border: 1px solid rgba(0,229,255,0.2);
+      border-radius: 100px;
+      padding: 0.35rem 1rem;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 1.2rem;
+    }
+
+    .header-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .header h1 {
+      font-size: 2.8rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      margin-bottom: 0.6rem;
+      background: linear-gradient(135deg, #e8edf5 20%, rgba(0,229,255,0.8) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 500;
+      font-family: 'DM Mono', monospace;
+      letter-spacing: 0.04em;
+    }
+
+    /* Card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2rem;
+      backdrop-filter: blur(12px);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.03),
+        0 24px 64px rgba(0,0,0,0.5),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    /* Field groups */
+    .fields { display: flex; flex-direction: column; gap: 1.2rem; }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .field label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-subtle);
+      font-family: 'DM Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .field label .label-icon {
+      width: 16px;
+      height: 16px;
+      opacity: 0.6;
+    }
+
+    .field input,
+    .field textarea {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.85rem 1.1rem;
+      font-family: 'Syne', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: var(--text);
+      width: 100%;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+      resize: none;
+    }
+
+    .field input::placeholder,
+    .field textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .field input:focus,
+    .field textarea:focus {
+      border-color: rgba(0,229,255,0.35);
+      background: rgba(14, 20, 32, 0.9);
+      box-shadow: 0 0 0 3px var(--accent-dim), inset 0 0 0 1px rgba(0,229,255,0.1);
+    }
+
+    .field .hint {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+      padding-left: 0.2rem;
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 0.4rem 0;
+    }
+
+    /* Buttons */
+    .btn {
+      width: 100%;
+      padding: 1rem 1.5rem;
+      border-radius: 12px;
+      border: none;
+      font-family: 'Syne', sans-serif;
+      font-size: 0.92rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0);
+      transition: background 0.2s;
+    }
+
+    .btn:hover::before { background: rgba(255,255,255,0.04); }
+    .btn:active { transform: scale(0.98); }
+
+    .btn-start {
+      background: linear-gradient(135deg, rgba(0,255,136,0.15), rgba(0,229,255,0.08));
+      border: 1px solid rgba(0,255,136,0.3);
+      color: var(--green);
+      box-shadow: 0 0 20px rgba(0,255,136,0.08), inset 0 1px 0 rgba(0,255,136,0.15);
+    }
+
+    .btn-start:hover {
+      border-color: rgba(0,255,136,0.5);
+      box-shadow: 0 0 30px rgba(0,255,136,0.15), inset 0 1px 0 rgba(0,255,136,0.2);
+    }
+
+    .btn-share {
+      background: linear-gradient(135deg, rgba(191,111,255,0.15), rgba(0,229,255,0.05));
+      border: 1px solid rgba(191,111,255,0.3);
+      color: var(--purple);
+      box-shadow: 0 0 20px rgba(191,111,255,0.08), inset 0 1px 0 rgba(191,111,255,0.15);
+    }
+
+    .btn-share:hover {
+      border-color: rgba(191,111,255,0.5);
+      box-shadow: 0 0 30px rgba(191,111,255,0.15);
+    }
+
+    .btn-stop {
+      background: linear-gradient(135deg, rgba(255,68,102,0.15), rgba(255,68,102,0.05));
+      border: 1px solid rgba(255,68,102,0.3);
+      color: var(--red);
+      box-shadow: 0 0 20px rgba(255,68,102,0.08), inset 0 1px 0 rgba(255,68,102,0.15);
+    }
+
+    .btn-stop:hover {
+      border-color: rgba(255,68,102,0.5);
+      box-shadow: 0 0 30px rgba(255,68,102,0.15);
+    }
+
+    .btn-copy {
+      padding: 0.65rem 1.2rem;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      white-space: nowrap;
+      width: auto;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, rgba(0,229,255,0.15), rgba(0,229,255,0.05));
+      border: 1px solid rgba(0,229,255,0.3);
+      color: var(--accent);
+    }
+
+    .btn-copy:hover {
+      border-color: rgba(0,229,255,0.5);
+    }
+
+    /* Share result */
+    .share-result {
+      display: none;
+      background: var(--surface-2);
+      border: 1px solid rgba(191,111,255,0.2);
+      border-radius: 14px;
+      padding: 1.2rem;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .share-result.visible { display: block; }
+
+    .share-result-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--purple);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .share-result-label::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--purple);
+      box-shadow: 0 0 8px var(--purple);
+    }
+
+    .share-url-row {
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+    }
+
+    .share-url-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.65rem 0.9rem;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--text-subtle);
+      outline: none;
+    }
+
+    /* Stop button */
+    .btn-stop-wrap { display: none; }
+    .btn-stop-wrap.visible { display: block; }
+
+    /* Status */
+    .status {
+      text-align: center;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      min-height: 2.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-subtle);
+    }
+
+    /* Button row */
+    .btn-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-top: 0.4rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      .header h1 { font-size: 2.2rem; }
+      .card { padding: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="wrapper">
+    <div class="header">
+      <div class="header-badge">Live Broadcast Tool</div>
+      <h1>LivePing</h1>
+      <p>configure · broadcast · share</p>
+    </div>
+
+    <div class="card">
+      <div class="fields">
+
+        <div class="field">
+          <label>
+            <svg class="label-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 4h12M2 8h8M2 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            Notification Title
+          </label>
+          <input id="title" type="text" value="Free Offer!" placeholder="e.g. New Update Available">
+        </div>
+
+        <div class="field">
+          <label>
+            <svg class="label-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 3h12v8H2zM6 11v2M10 11v2M5 13h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Message Body
+          </label>
+          <textarea id="body" rows="2" placeholder="What should the notification say?">Click here for instant access!</textarea>
+        </div>
+
+        <div class="field">
+          <label>
+            <svg class="label-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 8a6 6 0 1 0 12 0A6 6 0 0 0 2 8z" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            URL on Click
+          </label>
+          <input id="url" type="text" value="https://example.com" placeholder="https://your-site.com">
+        </div>
+
+        <div class="field">
+          <label>
+            <svg class="label-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 5v3M8 11h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            Interval (ms)
+          </label>
+          <input id="interval" type="number" value="5000" min="1" step="1" placeholder="5000">
+          <span class="hint">1ms = instant · 1000ms = 1 second · any integer works</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="btn-row">
+          <button class="btn btn-start" onclick="startLiveNotifications()">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M5 3l8 5-8 5V3z" fill="currentColor"/></svg>
+            Start Notifications
+          </button>
+
+          <button class="btn btn-share" onclick="generateShareableLink()">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="12" cy="3" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="13" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="3" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M5 7l5-3M5 9l5 3" stroke="currentColor" stroke-width="1.4"/></svg>
+            Generate Shareable Link
+          </button>
+        </div>
+
+        <div id="shareResult" class="share-result">
+          <div class="share-result-label">Shareable Link Ready</div>
+          <div class="share-url-row">
+            <input id="shareUrlInput" type="text" readonly>
+            <button class="btn btn-copy" onclick="copyShareLink()">Copy</button>
+          </div>
+        </div>
+
+        <div id="stopBtn" class="btn-stop-wrap">
+          <button class="btn btn-stop" onclick="stopNotifications()">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>
+            Stop Notifications
+          </button>
+        </div>
+
+        <div id="status" class="status"></div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let isSilentMode = false;
+    let silentConfig = null;
+    let intervalId = null;
+
+    // ===================== SILENT MODE (white page + auto-run) =====================
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const configB64 = params.get('config');
+      if (!configB64) return;
+
+      try {
+        const jsonStr = decodeURIComponent(atob(configB64));
+        const config = JSON.parse(jsonStr);
+
+        isSilentMode = true;
+        silentConfig = config;
+
+        document.body.style.background = '#ffffff';
+        document.body.style.margin = '0';
+        document.body.style.padding = '0';
+        const mainPanel = document.querySelector('.wrapper');
+        if (mainPanel) mainPanel.style.display = 'none';
+
+        await startSilentMode(config);
+      } catch (e) {
+        console.error('Bad config link');
+      }
+    })();
+
+    async function sendNotification() {
+      let title, bodyText, urlToOpen;
+
+      if (isSilentMode && silentConfig) {
+        title = silentConfig.title || 'Default Title';
+        bodyText = silentConfig.body || 'Default message';
+        urlToOpen = silentConfig.url || 'https://example.com';
+      } else {
+        title = (document.getElementById('title')?.value || '').trim() || 'Default Title';
+        bodyText = (document.getElementById('body')?.value || '').trim() || 'Default message';
+        urlToOpen = (document.getElementById('url')?.value || '').trim() || 'https://example.com';
+      }
+
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SHOW_NOTIFICATION',
+          title: title,
+          body: bodyText,
+          url: urlToOpen
+        });
+      }
+    }
+
+    async function startSilentMode(config) {
+      if (Notification.permission !== 'granted') {
+        await Notification.requestPermission();
+        if (Notification.permission !== 'granted') return;
+      }
+
+      await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+
+      await sendNotification();
+
+      const intervalMs = Math.max(1, parseInt(config.interval) || 5000);
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(sendNotification, intervalMs);
+    }
+
+    // ===================== NORMAL EDITOR MODE =====================
+    async function startLiveNotifications() {
+      isSilentMode = false;
+      const status = document.getElementById('status');
+      const stopBtn = document.getElementById('stopBtn');
+      const intervalInput = document.getElementById('interval');
+      let intervalMs = parseInt(intervalInput.value) || 5000;
+      if (intervalMs < 1) intervalMs = 1;
+
+      if (Notification.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          status.innerHTML = '⚠ Permission denied — allow notifications to proceed';
+          return;
+        }
+      }
+
+      await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+
+      status.innerHTML = `◉ Broadcasting every ${intervalMs}ms`;
+      status.style.color = 'var(--green)';
+
+      await sendNotification();
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(sendNotification, intervalMs);
+
+      stopBtn.classList.add('visible');
+    }
+
+    function stopNotifications() {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      const stopBtn = document.getElementById('stopBtn');
+      if (stopBtn) stopBtn.classList.remove('visible');
+      const status = document.getElementById('status');
+      if (status) {
+        status.innerHTML = '◼ Broadcast stopped';
+        status.style.color = 'var(--text-muted)';
+      }
+    }
+
+    function generateShareableLink() {
+      if (isSilentMode) return;
+
+      const config = {
+        title: (document.getElementById('title').value || '').trim(),
+        body: (document.getElementById('body').value || '').trim(),
+        url: (document.getElementById('url').value || '').trim(),
+        interval: parseInt(document.getElementById('interval').value) || 5000
+      };
+
+      const jsonStr = JSON.stringify(config);
+      const base64 = btoa(encodeURIComponent(jsonStr));
+      const baseUrl = window.location.href.split('?')[0];
+      const shareUrl = `${baseUrl}?config=${base64}`;
+
+      const resultDiv = document.getElementById('shareResult');
+      const input = document.getElementById('shareUrlInput');
+      input.value = shareUrl;
+      resultDiv.classList.add('visible');
+    }
+
+    function copyShareLink() {
+      const input = document.getElementById('shareUrlInput');
+      if (!input) return;
+      navigator.clipboard.writeText(input.value).then(() => {
+        const btn = document.querySelector('#shareResult .btn-copy');
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Copied';
+        setTimeout(() => { btn.textContent = originalText; }, 2000);
+      });
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>
