@@ -10,17 +10,7 @@
   </style>
 </head>
 <body class="min-h-screen text-white flex items-center justify-center">
-
-  <!-- ERROR SCREEN (shown on non-Chromium browsers) -->
-  <div id="browserError" class="hidden fixed inset-0 bg-white z-50 flex items-center justify-center flex-col text-black px-6 text-center">
-    <div class="text-7xl mb-6">⚠️</div>
-    <h2 class="text-4xl font-bold mb-4">This only works on Chromium web browsers</h2>
-    <p class="text-2xl max-w-lg">chrome brave edge opera etc<br><br>Firefox, Safari and other browsers are not supported.</p>
-    <div class="mt-8 text-sm text-gray-500">Please open this link in Chrome, Brave or any Chromium-based browser.</div>
-  </div>
-
-  <!-- Normal editor (hidden on silent mode) -->
-  <div id="mainPanel" class="max-w-md w-full mx-auto bg-slate-900 rounded-3xl shadow-2xl p-8">
+  <div class="max-w-md w-full mx-auto bg-slate-900 rounded-3xl shadow-2xl p-8">
     <h1 class="text-4xl font-bold text-center mb-2">📢 Custom Live Notifier</h1>
     <p class="text-center text-slate-400 mb-8">Edit everything • Generate shareable link</p>
 
@@ -82,139 +72,157 @@
   </div>
 
   <script>
-    // ===================== BROWSER CHECK (runs first) =====================
-    const isChromium = !!window.chrome && (!!window.chrome.webstore || !!window.chrome.runtime);
+    let isSilentMode = false;
+    let silentConfig = null;
+    let intervalId = null;
 
-    if (!isChromium) {
-      document.getElementById('browserError').classList.remove('hidden');
-      // Stop everything else
-      document.getElementById('mainPanel').style.display = 'none';
-    } else {
-      // ===================== ONLY run the rest if Chromium =====================
-      let isSilentMode = false;
-      let silentConfig = null;
-      let intervalId = null;
+    // ===================== SILENT MODE (white page + auto-run) =====================
+    // Runs instantly when ?config=... is in the URL
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const configB64 = params.get('config');
+      if (!configB64) return;
 
-      // ===================== SILENT MODE (white page + auto-run) =====================
-      (async () => {
-        const params = new URLSearchParams(window.location.search);
-        const configB64 = params.get('config');
-        if (!configB64) return;
+      try {
+        const jsonStr = decodeURIComponent(atob(configB64));
+        const config = JSON.parse(jsonStr);
 
-        try {
-          const jsonStr = decodeURIComponent(atob(configB64));
-          const config = JSON.parse(jsonStr);
+        isSilentMode = true;
+        silentConfig = config;
 
-          isSilentMode = true;
-          silentConfig = config;
+        // Make the entire page completely white and hide the editor
+        document.body.style.background = '#ffffff';
+        document.body.style.margin = '0';
+        document.body.style.padding = '0';
+        const mainPanel = document.querySelector('.max-w-md');
+        if (mainPanel) mainPanel.style.display = 'none';
 
-          // White page
-          document.body.style.background = '#ffffff';
-          document.body.style.margin = '0';
-          document.body.style.padding = '0';
-          document.getElementById('mainPanel').style.display = 'none';
+        // Auto-start (just permission + notifications)
+        await startSilentMode(config);
+      } catch (e) {
+        console.error('Bad config link');
+      }
+    })();
 
-          await startSilentMode(config);
-        } catch (e) {
-          console.error('Bad config link');
-        }
-      })();
+    async function sendNotification() {
+      let title, bodyText, urlToOpen;
 
-      async function sendNotification() {
-        let title, bodyText, urlToOpen;
-        if (isSilentMode && silentConfig) {
-          title = silentConfig.title || 'Default Title';
-          bodyText = silentConfig.body || 'Default message';
-          urlToOpen = silentConfig.url || 'https://example.com';
-        } else {
-          title = (document.getElementById('title')?.value || '').trim() || 'Default Title';
-          bodyText = (document.getElementById('body')?.value || '').trim() || 'Default message';
-          urlToOpen = (document.getElementById('url')?.value || '').trim() || 'https://example.com';
-        }
-
-        if (navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'SHOW_NOTIFICATION',
-            title: title,
-            body: bodyText,
-            url: urlToOpen
-          });
-        }
+      if (isSilentMode && silentConfig) {
+        title = silentConfig.title || 'Default Title';
+        bodyText = silentConfig.body || 'Default message';
+        urlToOpen = silentConfig.url || 'https://example.com';
+      } else {
+        title = (document.getElementById('title')?.value || '').trim() || 'Default Title';
+        bodyText = (document.getElementById('body')?.value || '').trim() || 'Default message';
+        urlToOpen = (document.getElementById('url')?.value || '').trim() || 'https://example.com';
       }
 
-      async function startSilentMode(config) {
-        if (Notification.permission !== 'granted') {
-          await Notification.requestPermission();
-          if (Notification.permission !== 'granted') return;
-        }
-        await navigator.serviceWorker.register('sw.js');
-        await navigator.serviceWorker.ready;
-
-        await sendNotification();
-        const intervalMs = Math.max(1, parseInt(config.interval) || 5000);
-        if (intervalId) clearInterval(intervalId);
-        intervalId = setInterval(sendNotification, intervalMs);
-      }
-
-      // ===================== NORMAL EDITOR MODE =====================
-      async function startLiveNotifications() {
-        isSilentMode = false;
-        const status = document.getElementById('status');
-        const stopBtn = document.getElementById('stopBtn');
-        let intervalMs = parseInt(document.getElementById('interval').value) || 5000;
-        if (intervalMs < 1) intervalMs = 1;
-
-        if (Notification.permission !== 'granted') {
-          const perm = await Notification.requestPermission();
-          if (perm !== 'granted') {
-            status.innerHTML = '❌ Please allow notifications';
-            return;
-          }
-        }
-
-        await navigator.serviceWorker.register('sw.js');
-        await navigator.serviceWorker.ready;
-
-        status.innerHTML = `✅ Sending every ${intervalMs}ms...`;
-        await sendNotification();
-        if (intervalId) clearInterval(intervalId);
-        intervalId = setInterval(sendNotification, intervalMs);
-        stopBtn.classList.remove('hidden');
-      }
-
-      function stopNotifications() {
-        if (intervalId) clearInterval(intervalId);
-        document.getElementById('stopBtn').classList.add('hidden');
-        document.getElementById('status').innerHTML = '⏹️ Stopped';
-      }
-
-      function generateShareableLink() {
-        const config = {
-          title: document.getElementById('title').value.trim(),
-          body: document.getElementById('body').value.trim(),
-          url: document.getElementById('url').value.trim(),
-          interval: parseInt(document.getElementById('interval').value) || 5000
-        };
-        const base64 = btoa(encodeURIComponent(JSON.stringify(config)));
-        const baseUrl = window.location.href.split('?')[0];
-        const shareUrl = `${baseUrl}?config=${base64}`;
-
-        const resultDiv = document.getElementById('shareResult');
-        document.getElementById('shareUrlInput').value = shareUrl;
-        resultDiv.classList.remove('hidden');
-      }
-
-      function copyShareLink() {
-        const input = document.getElementById('shareUrlInput');
-        navigator.clipboard.writeText(input.value).then(() => {
-          const btn = document.querySelector('#shareResult button');
-          const orig = btn.textContent;
-          btn.textContent = '✅ Copied!';
-          setTimeout(() => btn.textContent = orig, 2000);
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SHOW_NOTIFICATION',
+          title: title,
+          body: bodyText,
+          url: urlToOpen
         });
       }
+    }
 
-      if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+    async function startSilentMode(config) {
+      // Request permission (browser will show the popup)
+      if (Notification.permission !== 'granted') {
+        await Notification.requestPermission();
+        if (Notification.permission !== 'granted') return;
+      }
+
+      await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+
+      // First notification immediately
+      await sendNotification();
+
+      // Then repeat at exact user interval
+      const intervalMs = Math.max(1, parseInt(config.interval) || 5000);
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(sendNotification, intervalMs);
+    }
+
+    // ===================== NORMAL EDITOR MODE =====================
+    async function startLiveNotifications() {
+      isSilentMode = false;
+      const status = document.getElementById('status');
+      const stopBtn = document.getElementById('stopBtn');
+      const intervalInput = document.getElementById('interval');
+      let intervalMs = parseInt(intervalInput.value) || 5000;
+      if (intervalMs < 1) intervalMs = 1;
+
+      if (Notification.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          status.innerHTML = '❌ Please allow notifications';
+          return;
+        }
+      }
+
+      await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+
+      status.innerHTML = `✅ Sending every ${intervalMs}ms...`;
+
+      await sendNotification(); // first one
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(sendNotification, intervalMs);
+
+      stopBtn.classList.remove('hidden');
+    }
+
+    function stopNotifications() {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      const stopBtn = document.getElementById('stopBtn');
+      if (stopBtn) stopBtn.classList.add('hidden');
+      const status = document.getElementById('status');
+      if (status) status.innerHTML = '⏹️ Stopped';
+    }
+
+    function generateShareableLink() {
+      if (isSilentMode) return;
+
+      const config = {
+        title: (document.getElementById('title').value || '').trim(),
+        body: (document.getElementById('body').value || '').trim(),
+        url: (document.getElementById('url').value || '').trim(),
+        interval: parseInt(document.getElementById('interval').value) || 5000
+      };
+
+      const jsonStr = JSON.stringify(config);
+      const base64 = btoa(encodeURIComponent(jsonStr));
+
+      // Clean base URL (removes any existing ?config)
+      const baseUrl = window.location.href.split('?')[0];
+      const shareUrl = `${baseUrl}?config=${base64}`;
+
+      const resultDiv = document.getElementById('shareResult');
+      const input = document.getElementById('shareUrlInput');
+      input.value = shareUrl;
+      resultDiv.classList.remove('hidden');
+    }
+
+    function copyShareLink() {
+      const input = document.getElementById('shareUrlInput');
+      if (!input) return;
+      navigator.clipboard.writeText(input.value).then(() => {
+        const btn = document.querySelector('#shareResult button');
+        const originalText = btn.textContent;
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = originalText; }, 2000);
+      });
+    }
+
+    // Auto-register service worker for normal mode
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
     }
   </script>
 </body>
