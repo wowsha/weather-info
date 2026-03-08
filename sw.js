@@ -5,13 +5,13 @@ self.addEventListener('message', event => {
     
     self.registration.showNotification(title, {
       body: body,
-      icon: 'https://picsum.photos/id/1015/200/200',   // nice weather-style icon
+      icon: 'https://picsum.photos/id/1015/200/200',
       badge: 'https://picsum.photos/id/1015/100/100',
+      tag: 'weather-update',     // ← this replaces the previous notification instead of stacking
       vibrate: [200, 100, 200]
     });
   }
 });
 
-// Optional: keep SW alive
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', () => self.clients.claim());
